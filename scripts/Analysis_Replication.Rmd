@@ -1,0 +1,780 @@
+---
+title: "Analysis"
+output:
+  html_document:
+    df_print: paged
+  word_document: default
+  pdf_document: default
+---
+
+```{r packages, eval = TRUE, include = FALSE}
+# ipak function: install and load multiple R packages.
+# check to see if packages are installed. Install them if they are not, then load them into the R session.
+
+ipak <- function(pkg){
+  new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+  if (length(new.pkg)) 
+    install.packages(new.pkg, dependencies = TRUE)
+  sapply(pkg, require, character.only = TRUE)
+}
+
+# usage
+packages <- c("tidyverse", "caret", "table1", "pwr", "lavaan", "corrplot", "stargazer", "pander", "knitr", "mediation", "ggpubr", "psych", "naniar", "Hmisc", "mediation", "dplyr")
+ipak(packages)
+```
+
+```{r data_wrangling, eval = TRUE, include = FALSE}
+rm(list = ls())
+
+# Load data
+df1 = (read.csv("data.csv", header=T,sep=","))
+
+# Rename the variables of demographics and game experience
+colnames(df1)[colnames(df1) == "Q2"] <- "age"
+colnames(df1)[colnames(df1) == "Q6"] <- "hour"
+colnames(df1)[colnames(df1) == "Q7"] <- "year"
+colnames(df1)[colnames(df1) == "Q30"] <- "education"
+colnames(df1)[colnames(df1) == "Q31"] <- "income"
+colnames(df1)[colnames(df1) == "Q32"] <- "gender"
+colnames(df1)[colnames(df1) == "Q5"] <- "genre"
+colnames(df1)[colnames(df1) == "Q19"] <- "competitive"
+
+# As "1" represents "born in 2010", adding 10 to the values can represent the age
+df1$age <- df1$age+10
+
+# Replace "not applicable" with NA
+df1 <-df1 %>% 
+  replace_with_na_at(.vars = c("Q23_1","Q23_2", "Q23_3", "Q23_4", "Q23_5", "Q23_6", "Q23_7", "Q23_8",
+                               "Q25_1","Q25_2", "Q25_3","Q25_4","Q25_5","Q25_6","Q25_7","Q25_8","Q25_9","Q25_10"),
+                     condition = ~.x == 6)
+
+df1 <-df1 %>% 
+  replace_with_na_at(.vars = "gender", condition = ~.x == 3)
+
+# Compute new variables
+df1$Q10_1 <- dplyr::recode(df1$Q10_1, '1' = 7, '2' = 6, '3' = 5, '4' = 4, '5' = 3, '6' = 2, '7' = 1)
+df1$Q22_4 <- dplyr::recode(df1$Q22_4, '1' = 7, '2' = 6, '3' = 5, '4' = 4, '5' = 3, '6' = 2, '7' = 1)
+df1$genre <- dplyr::recode(df1$genre, '1' = 1, '2' = 1, '3' = 1, '4' = 1, '5' = 2, '6' = 1, '8' = 1, '9' = 2)
+# 8 = moba, 9 = mmorpg
+```
+
+
+\newpage
+# Participants
+
+```{r Participant Characteristics}
+
+df2 <- df1
+
+# calculate the mean and SD of hour and year
+mean(df2$year)
+sd(df2$year)
+mean(df2$hour)
+sd(df2$hour)
+
+# Create a table of participant demographics
+df2$gender <- 
+  factor(df2$gender, levels = c(1,2,3),
+         labels = c("Male",
+                    "Female",
+                    "Not Answer"))
+
+df2$education <- 
+  factor(df2$education, levels = c(1,2,3,4,5,6),
+         labels = c("Less than or completed elementary school",
+                    "Junior high school",
+                    "Senior high school (including technical school)",
+                    "University (including college)",
+                    "Master's Degree",
+                    "Doctoral or above"))
+
+df2$income <-
+  factor(df2$income, levels = c(1,2,3,4,5,6),
+         labels = c("≤5",
+                    "6-10",
+                    "11-15",
+                    "16-20",
+                    "21-25",
+                    "≥26"))
+
+df2$year <-
+  factor(df2$year, levels = c(1,2,3,4,5),
+         labels = c("≤1",
+                    "2-3",
+                    "4-5",
+                    "6-7",
+                    "≥8"))
+
+df2$hour <-
+  factor(df2$hour, levels = c(1,2,3,4,5),
+         labels = c("≤3",
+                    "4-7",
+                    "8-11",
+                    "12-15",
+                    "≥16"))
+
+units(df2$age) <- "years"
+table1(~ age + gender + education + income + hour + year, data = df2, output = "html")
+
+```
+
+\newpage
+# Measures
+## Perceived Interdependence
+### Items
+
+Please rate your agreement with the following statements
+
+When I was in the teamwork of this MMO game in the past half year… 
+
+1. My teammates influenced my gameplay
+2. I had to keep an eye on what my teammates are doing
+3. I could effectively play the game without interacting with my teammates (R)
+4. I had to interact with my teammates a lot
+5. The actions of me and my teammates were strongly linked
+6. My success in the game strongly depends on my teammates
+7. I had the most impact on what happened in the game
+8. I had more power to determine my team’s outcome in the game
+9. I was most in control of what happened in the game
+10. I had the least amount of influence on the outcomes of the game (R)
+
+### CFA
+```{r Perceived Interdependence}
+
+### CFA for mutual dependence
+cfamodel <- ' mutual dependence =~ Q10_1 + Q10_2 + Q10_3 + Q10_4 + Q10_5 + Q10_6'
+fit <- cfa(cfamodel, df1)
+summary(fit, standardized=T, fit.measures=T,rsq=T)
+
+### CFA for power
+cfamodel <- ' power =~ Q22_1 + Q22_2 + Q22_3 + Q22_4'
+fit <- cfa(cfamodel, df1)
+summary(fit, standardized=T, fit.measures=T,rsq=T)
+
+### reliability
+df1%>%
+  dplyr::select(Q10_1:Q10_6) %>% 
+  psych::alpha(title = "mutual dependence") 
+
+df1%>%
+  dplyr::select(Q22_1:Q22_4) %>% 
+  psych::alpha(title = "power") 
+
+```
+
+\newpage
+## Passion
+### Items
+
+Please rate your agreement with the following statements about your experience with this MMO game in the past half year.
+
+1. This game was in harmony with the other activities in my life (**dropped)
+2. This game reflected the qualities I like about myself
+3. This game allowed me to live memorable experiences
+4. The new things that I discovered with this game allowed me to appreciate it even more
+5. This game allowed me to live a variety of experiences
+6. I could not live without this game
+7. I was emotionally dependent on this game
+8. I had almost an obsessive feeling for this game
+9. I had a tough time controlling my need to play this game
+10. The urge was so strong, I could not help myself from playing this game
+
+### CFA
+```{r Passion}
+
+### CFA for harmonious passion
+cfamodel <- ' harmonious passion =~ Q20_1 + Q20_4 + Q20_5 + Q20_6 + Q20_7'
+fit <- cfa(cfamodel, df1)
+summary(fit, standardized=T, fit.measures=T,rsq=T)
+
+### CFA for obsessive passion
+cfamodel <- ' obsessive passion =~ Q21_1 + Q21_2 + Q21_3 + Q21_4 + Q21_5'
+fit <- cfa(cfamodel, df1)
+summary(fit, standardized=T, fit.measures=T,rsq=T)
+
+### reliability
+df1%>%
+  dplyr::select(Q20_1, Q20_4, Q20_5, Q20_6, Q20_7) %>% 
+  psych::alpha(title = "harmonious passion") 
+
+## drop Q20_1
+df1%>%
+  dplyr::select(Q20_4, Q20_5, Q20_6, Q20_7) %>% 
+  psych::alpha(title = "harmonious passion") 
+
+df1%>%
+  dplyr::select(Q21_1:Q21_5) %>% 
+  psych::alpha(title = "obsessive passion") 
+```
+
+\newpage
+## Prosocial behaviors
+### Items
+
+Please rate your frequency with the following situations
+
+1. I shared resources with my teammates (**dropped)
+2. I took risks to help my teammates (**dropped)
+3. I encouraged my teammates (**dropped)
+4. I comforted my teammates (**dropped)
+5. I took initiative to take the blame when something bad happened (**dropped)
+6. I gave my teammates’ suggestions to improve their play
+7. I pointed out things that my teammates might not see
+8. I told my teammates about tricks to use
+
+```{r Prosocial behaviors}
+
+fa.parallel(df1 %>% dplyr::select(Q23_1:Q23_8), fm = 'minres', fa = 'fa')
+twofactor <- fa(df1 %>% dplyr::select(Q23_1:Q23_8), rotate = "promax", fm="minres")
+print(twofactor$loadings,cutoff = 0.4)
+fa.diagram(twofactor)
+
+### CFA for prosocial behaviors
+cfamodel <- ' prosocial behaviors =~ Q23_1 + Q23_2 + Q23_3 + Q23_4 + Q23_5 + Q23_6 + Q23_7 + Q23_8'
+fit <- cfa(cfamodel, df1, missing = "ML")
+summary(fit, standardized=T, fit.measures=T,rsq=T) ## CFI = 0.701, TLI = 0.582
+
+cfamodel <- ' prosocial behaviors =~ a*Q23_6 + a*Q23_7 + a*Q23_8'
+fit <- cfa(cfamodel, df1, missing = "ML")
+summary(fit, standardized=T, fit.measures=T,rsq=T) ## CFI = 0.940, TLI = 0.911
+
+modindices(fit, sort = TRUE, maximum.number = 5)
+
+### reliability
+df1%>%
+  dplyr::select(Q23_6, Q23_7, Q23_8) %>% 
+  psych::alpha(title = "prosocial behaviors") 
+```
+
+
+\newpage
+## Toxicity 
+### Items
+
+Please rate your frequency with the following situations
+
+When I was in the teamwork of my most frequently played MMO game in the past half year…
+
+1. I said curse or swear words toward my teammates
+2. I made negative comments about the intelligence of my teammates
+3. I said general insult to my teammates
+4. I made negative comments about my teammates’ abilities to play 
+5. I asked my teammates to leave the game
+6. I threatened my teammates (**dropped)
+7. I aided the enemy (**dropped)
+8. I was away from my keyboard (**dropped)
+9. I took away resources belonging to my teammates when I got angry
+10. I taunted my teammates
+
+```{r Toxicity}
+### EFA for toxicity to teammates
+fa.parallel(df1 %>% dplyr::select(Q25_1:Q25_10), fm = 'minres', fa = 'fa')
+mm <- fa(df1 %>% dplyr::select(Q25_1:Q25_10), rotate = "promax", fm="minres")
+print(twofactor$loadings,cutoff = 0.4)
+fa.diagram(mm)
+
+### CFA for toxicity to teammates
+cfamodel <- ' toxicity to teammates =~ Q25_1 + Q25_2 + Q25_3 + Q25_7 + Q25_8 + Q25_9 + Q25_10'
+fit <- cfa(cfamodel, df1, missing = "ML")
+summary(fit, standardized=T, fit.measures=T,rsq=T)
+
+modindices(fit, sort = TRUE, maximum.number = 5)
+
+### reliability
+df1%>%
+  dplyr::select(Q25_1, Q25_2, Q25_3, Q25_7, Q25_8, Q25_9, Q25_10) %>% 
+  psych::alpha(title = "toxicity to teammates")
+```
+
+```{r CFA model fit}
+
+set.seed(13434)
+
+model <- '
+    mutual_dependence =~ Q10_1 + Q10_2 + Q10_3 + Q10_4 + Q10_5 + Q10_6
+    power =~ Q22_1 + Q22_2 + Q22_3 + Q22_4
+    harmonious =~ Q20_4 + Q20_5 + Q20_6 + Q20_7
+    obsessive =~ Q21_1 + Q21_2 + Q21_3 + Q21_4 + Q21_5
+    prosocial =~ Q23_6 + Q23_7 + Q23_8
+    toxicity_teammate =~ Q25_1 + Q25_2 + Q25_3 + Q25_7 + Q25_8 + Q25_9 + Q25_10
+'
+
+fit <- cfa(model, df1, missing = "ML")
+summary(fit, standardized=T, fit.measures=T,rsq=T)
+
+modindices(fit, sort = TRUE, maximum.number = 10)
+```
+
+```{r}
+fit_wishart <- cfa(
+  model,
+  data = df1,
+  missing = "ML",
+  likelihood = "wishart"
+)
+
+summary(fit_wishart, fit.measures = TRUE)
+```
+
+```{r full SEM model fit}
+set.seed(10934)
+
+# Full Model
+model <- '
+    # measurement model
+    mutual_dependence =~ Q10_1 + Q10_2 + Q10_3 + Q10_4 + Q10_5 + Q10_6
+    power =~ Q22_1 + Q22_2 + Q22_3 + Q22_4
+    harmonious =~ Q20_4 + Q20_5 + Q20_6 + Q20_7
+    obsessive =~ Q21_1 + Q21_2 + Q21_3 + Q21_4 + Q21_5
+    prosocial =~ Q23_6 + Q23_7 + Q23_8
+    toxicity_teammate =~ Q25_1 + Q25_2 + Q25_3 + Q25_7 + Q25_8 + Q25_9 + Q25_10
+    
+    # regressions
+    obsessive ~ mutual_dependence + power + age + gender + education + income + year + hour + competitive
+    harmonious ~ mutual_dependence + power + age + gender + education + income + year + hour  + competitive
+    prosocial ~ obsessive + harmonious + mutual_dependence + power + age + gender + education + income + year + hour  + competitive
+    toxicity_teammate ~ obsessive + harmonious + mutual_dependence + power + age + gender + education + income + year + hour + competitive
+    
+    # residual correlations
+    obsessive ~~ harmonious
+    Q21_1	~~ Q21_3
+    income	~	obsessive
+    income	~	prosocial
+    income	~	power
+    power	~	gender
+    mutual_dependence	~	income
+    competitive ~ mutual_dependence
+'
+
+fit <- sem(model, df1, missing = "ML")
+summary(fit, standardized=T, fit.measures=T,rsq=T)
+# modindices(fit, sort = TRUE, maximum.number = 10)
+```
+
+```{r full SEM model fit respecified}
+set.seed(10934)
+
+# Full Model
+model <- '
+    # measurement model
+    mutual_dependence =~ Q10_1 + Q10_2 + Q10_3 + Q10_4 + Q10_5 + Q10_6
+    power =~ Q22_1 + Q22_2 + Q22_3 + Q22_4
+    harmonious =~ Q20_4 + Q20_5 + Q20_6 + Q20_7
+    obsessive =~ Q21_1 + Q21_2 + Q21_3 + Q21_4 + Q21_5
+    prosocial =~ Q23_6 + Q23_7 + Q23_8
+    toxicity_teammate =~ Q25_1 + Q25_2 + Q25_3 + Q25_7 + Q25_8 + Q25_9 + Q25_10
+    
+    # regressions
+    obsessive ~ mutual_dependence + power + age + gender + education + income + year + hour + competitive
+    harmonious ~ mutual_dependence + power + age + gender + education + income + year + hour  + competitive
+    prosocial ~ obsessive + harmonious + mutual_dependence + power + age + gender + education + income + year + hour  + competitive
+    toxicity_teammate ~ obsessive + harmonious + mutual_dependence + power + age + gender + education + income + year + hour + competitive
+    
+    # residual correlations
+    obsessive ~~ harmonious
+    Q21_1	~~ Q21_3
+'
+
+fit <- sem(model, df1, missing = "ML")
+summary(fit, standardized=T, fit.measures=T,rsq=T)
+modindices(fit, sort = TRUE, maximum.number = 10)
+```
+
+
+
+
+```{r SEM seperate model fit}
+
+set.seed(10934)
+
+# Prosocial as DV
+model <- '
+    # measurement model
+    mutual_dependence =~ Q10_1 + Q10_2 + Q10_3 + Q10_4 + Q10_5 + Q10_6
+    power =~ Q22_1 + Q22_2 + Q22_3 + Q22_4
+    harmonious =~ Q20_4 + Q20_5 + Q20_6 + Q20_7
+    obsessive =~ Q21_1 + Q21_2 + Q21_3 + Q21_4 + Q21_5
+    prosocial =~ Q23_6 + Q23_7 + Q23_8
+    
+    # regressions
+    obsessive ~ mutual_dependence + power + age + gender + education + income + year + hour  + competitive
+    harmonious ~ mutual_dependence + power + age + gender + education + income + year + hour  + competitive
+    prosocial ~ obsessive + harmonious + mutual_dependence + power + age + gender + education + income + year + hour  + competitive
+    
+    # residual correlations
+    obsessive ~~ harmonious
+    Q21_1	~~ Q21_3
+    income	~	prosocial
+    gender ~ prosocial
+    income ~ education
+    income ~ obsessive
+    year ~ gender
+    gender ~ year
+    competitive ~ harmonious
+'
+
+fit <- sem(model, df1, missing = "ML")
+summary(fit, standardized=T, fit.measures=T,rsq=T)
+
+# Toxicity as DV
+
+model <- '
+    # measurement model
+    mutual_dependence =~ Q10_1 + Q10_2 + Q10_3 + Q10_4 + Q10_5 + Q10_6
+    power =~ Q22_1 + Q22_2 + Q22_3 + Q22_4
+    harmonious =~ Q20_4 + Q20_5 + Q20_6 + Q20_7
+    obsessive =~ Q21_1 + Q21_2 + Q21_3 + Q21_4 + Q21_5
+    toxicity_teammate =~ Q25_1 + Q25_2 + Q25_3 + Q25_7 + Q25_8 + Q25_9 + Q25_10
+    
+    # regressions
+    obsessive ~ mutual_dependence + power + age + gender + education + income + year + hour  + competitive
+    harmonious ~ mutual_dependence + power + age + gender + education + income + year + hour  + competitive
+    toxicity_teammate ~ obsessive + harmonious + mutual_dependence + power + age + gender + hour + education + income + year  + competitive
+    
+    # residual correlations
+    harmonious ~~ obsessive
+    Q21_1	~~ Q21_3
+    income ~ obsessive
+    Q22_1 ~~ income
+    power ~ gender
+    competitive ~ harmonious
+    competitive ~ mutual_dependence
+'
+
+fit <- sem(model, df1, missing = "ML")
+summary(fit, standardized=T, fit.measures=T,rsq=T)
+
+
+```
+
+
+```{r SEM model fit reverse mediator and DV}
+
+set.seed(10734)
+
+# Full Model
+model <- '
+    # measurement model
+    mutual_dependence =~ Q10_1 + Q10_2 + Q10_3 + Q10_4 + Q10_5 + Q10_6
+    power =~ Q22_1 + Q22_2 + Q22_3 + Q22_4
+    harmonious =~ Q20_4 + Q20_5 + Q20_6 + Q20_7
+    obsessive =~ Q21_1 + Q21_2 + Q21_3 + Q21_4 + Q21_5
+    prosocial =~ Q23_6 + Q23_7 + Q23_8
+    toxicity_teammate =~ Q25_1 + Q25_2 + Q25_3 + Q25_7 + Q25_8 + Q25_9 + Q25_10
+    
+    # regressions
+    prosocial ~ mutual_dependence + power + age + gender + education + income + year + hour + competitive
+    toxicity_teammate ~ mutual_dependence + power + age + gender + education + income + year + hour + competitive
+    harmonious ~ prosocial + toxicity_teammate + mutual_dependence + power + age + gender + education + income + year + hour + competitive
+    obsessive ~ prosocial + toxicity_teammate + mutual_dependence + power + age + gender + education + income + year + hour + competitive
+    
+    # residual correlations
+competitive	~	harmonious
+competitive	~	toxicity_teammate
+competitive	~	obsessive
+competitive	~	mutual_dependence
+mutual_dependence	~	competitive
+competitive	~	prosocial
+Q21_1	~~	Q21_3
+competitive	~	power	
+'
+
+fit <- sem(model, df1, missing = "ML")
+summary(fit, standardized=T, fit.measures=T,rsq=T)
+
+```
+
+```{r SEM model fit reverse IV and DV}
+
+set.seed(10745)
+
+# Full Model
+model <- '
+    # measurement model
+    mutual_dependence =~ Q10_1 + Q10_2 + Q10_3 + Q10_4 + Q10_5 + Q10_6
+    power =~ Q22_1 + Q22_2 + Q22_3 + Q22_4
+    harmonious =~ Q20_4 + Q20_5 + Q20_6 + Q20_7
+    obsessive =~ Q21_1 + Q21_2 + Q21_3 + Q21_4 + Q21_5
+    prosocial =~ Q23_6 + Q23_7 + Q23_8
+    toxicity_teammate =~ Q25_1 + Q25_2 + Q25_3 + Q25_7 + Q25_8 + Q25_9 + Q25_10
+    
+    # regressions
+    obsessive ~ prosocial + toxicity_teammate + age + gender + education + income + year + hour + competitive 
+    harmonious ~ prosocial + toxicity_teammate + age + gender + education + income + year + hour + competitive
+    mutual_dependence ~ obsessive + harmonious + age + gender + education + income + year + hour + competitive + prosocial + toxicity_teammate 
+    power ~ obsessive + harmonious + age + gender + education + income + year + hour + competitive + prosocial + toxicity_teammate 
+    
+    # residual correlations
+    Q21_1	~~	Q21_3
+    harmonious	~	mutual_dependence
+    harmonious	~~	obsessive
+    harmonious	~	obsessive
+    obsessive	~	power
+    obsessive	~	harmonious
+    obsessive	~	mutual_dependence
+'
+
+fit <- sem(model, df1, missing = "ML")
+summary(fit, standardized=T, fit.measures=T,rsq=T)
+
+```
+
+```{r SEM model fit reverse IV and mediator}
+set.seed(10765)
+
+# Full Model
+model <- '
+    # measurement model
+    mutual_dependence =~ Q10_1 + Q10_2 + Q10_3 + Q10_4 + Q10_5 + Q10_6
+    power =~ Q22_1 + Q22_2 + Q22_3 + Q22_4
+    harmonious =~ Q20_4 + Q20_5 + Q20_6 + Q20_7
+    obsessive =~ Q21_1 + Q21_2 + Q21_3 + Q21_4 + Q21_5
+    prosocial =~ Q23_6 + Q23_7 + Q23_8
+    toxicity_teammate =~ Q25_1 + Q25_2 + Q25_3 + Q25_7 + Q25_8 + Q25_9 + Q25_10
+    
+    # regressions
+    power ~ harmonious + obsessive + age + gender + education + year + hour + competitive + income
+    mutual_dependence ~ harmonious + obsessive + age + gender + education+ year + hour  + competitive + income
+    prosocial ~ obsessive + harmonious + mutual_dependence + power + age + gender + education + year + hour  + competitive + income
+    toxicity_teammate ~ obsessive + harmonious + mutual_dependence + power + age + gender + education + year + hour + competitive + income
+    
+    # residual correlations
+    Q21_1	~~	Q21_3
+    harmonious	~	income
+    income	~	prosocial
+    income	~	harmonious
+    income	~	mutual_dependence
+    income	~	power
+    harmonious	~	competitive
+'
+fit <- sem(model, df1, missing = "ML")
+summary(fit, standardized=T, fit.measures=T,rsq=T)
+
+```
+
+```{r Compute new variables, eval = TRUE, include = FALSE}
+df1$mutual_dependence <- round(rowMeans(df1%>% dplyr::select(Q10_1:Q10_6)), digits = 2)
+df1$power <- round(rowMeans(df1%>% dplyr::select(Q22_1:Q22_4)), digits = 2)
+df1$harmonious <- round(rowMeans(df1%>% dplyr::select(Q20_4:Q20_7)), digits = 2)
+df1$obsessive <- round(rowMeans(df1%>% dplyr::select(Q21_1:Q21_5)), digits = 2)
+df1$prosocial <- round(rowMeans(df1%>% dplyr::select(Q23_6:Q23_8)), digits = 2)
+df1$toxicity_teammate <- round(rowMeans(df1%>% dplyr::select(Q25_1:Q25_3, Q25_7:Q25_10)), digits = 2)
+df1$prosocialtotal <- round(rowSums(df1%>% dplyr::select(Q23_6:Q23_8)), digits = 2)
+df1$toxicity_teammatetotal <- round(rowSums(df1%>% dplyr::select(Q25_1:Q25_3, Q25_7:Q25_10)), digits = 2)
+```
+
+
+\newpage
+# Results
+## Correlation analysis 
+
+```{r Correlation Matrix}
+
+##correlation
+df3 <- data.frame(df1$mutual_dependence, df1$power, df1$harmonious, df1$obsessive, df1$prosocial, df1$toxicity_teammate, df1$age, df1$gender, df1$income, df1$education, df1$year, df1$hour, df1$competitive)
+names(df3) <- c("mutual_dependence", "power", "harmonious", "obsessive", "prosocial", "toxicity_teammate", "age", "gender", "income", "education", "year", "hour", "competitive")
+
+rcorr(as.matrix(df3))
+
+# check descriptive statistics of variables
+library(pastecs)
+res <- stat.desc(df3)
+round(res, 2)
+```
+
+
+\newpage
+## Hypothesis testing
+
+```{r Hypothesis Testing Multiple Regression}
+reg1 <- lm(prosocial ~ mutual_dependence + power + age + gender + education + income + hour + year + competitive, data = df1)
+summary(reg1)
+
+reg2 <- lm(toxicity_teammate ~ mutual_dependence + power + age + gender + education + income + hour + year + competitive, data = df1)
+summary(reg2)
+```
+
+
+```{r Hypothesis Testing Mediation SEM}
+# Set seed for replicability of results
+set.seed(10903)
+
+# Full model
+my.med0 <- '# direct effect
+            toxicity_teammate ~ c1 * mutual_dependence
+            toxicity_teammate ~ c2 * power
+            prosocial ~ c3 * mutual_dependence
+            prosocial ~ c4 * power
+            
+            # mediation
+            obsessive ~ a1 * mutual_dependence + age + gender + education + income + hour + year + competitive
+            obsessive ~ a2 * power 
+            harmonious ~ a3 * mutual_dependence + age + gender + education + income + hour + year + competitive
+            harmonious ~ a4 * power 
+            
+            toxicity_teammate ~ b1 * obsessive + age + gender + education + income + hour + year + competitive
+            toxicity_teammate ~ b2 * harmonious
+            prosocial ~ b3 * obsessive + age + gender + education + income + hour + year + competitive
+            prosocial ~ b4 * harmonious            
+            
+            # define the indirect effect
+            mul_har_pro := a3*b4
+            pow_har_pro := a4*b4
+            mul_obs_pro := a1*b3
+            pow_obs_pro := a2*b3
+            mul_har_tox := a3*b2
+            pow_har_tox := a4*b2
+            mul_obs_tox := a1*b1
+            pow_obs_tox := a2*b1
+            
+            # set the covariance
+            harmonious ~~ obsessive'
+
+my.fit0 <- sem(my.med0, data=df1, se="bootstrap", bootstrap=1000, missing = "ML")
+summary(my.fit0, standardized = TRUE, fit.measures = TRUE)
+parameterEstimates(my.fit0)
+
+# Prosocial as DV
+
+my.med1 <- '# direct effect
+            prosocial ~ c3 * mutual_dependence
+            prosocial ~ c4 * power
+            
+            # mediation
+            obsessive ~ a1 * mutual_dependence + age + gender + education + income + hour + year + competitive
+            obsessive ~ a2 * power 
+            harmonious ~ a3 * mutual_dependence + age + gender + education + income + hour + year + competitive 
+            harmonious ~ a4 * power 
+            
+            prosocial ~ b3 * obsessive + age + gender + education + income + hour + year + competitive
+            prosocial ~ b4 * harmonious            
+            
+            # define the indirect effect
+            mul_har_pro := a3*b4
+            pow_har_pro := a4*b4
+            mul_obs_pro := a1*b3
+            pow_obs_pro := a2*b3
+            
+            # set the covariance
+            harmonious ~~ obsessive'
+
+my.fit1 <- sem(my.med1, data=df1, se="bootstrap", bootstrap=1000, missing = "ML")
+summary(my.fit1, standardized = TRUE, fit.measures = TRUE)
+parameterEstimates(my.fit1)
+
+# Toxicity as DV
+
+my.med2 <- '# direct effect
+            toxicity_teammate ~ c1 * mutual_dependence
+            toxicity_teammate ~ c2 * power
+            
+            # mediation
+            obsessive ~ a1 * mutual_dependence + age + gender + education + income + hour + year + competitive
+            obsessive ~ a2 * power 
+            harmonious ~ a3 * mutual_dependence + age + gender + education + income + hour + year + competitive
+            harmonious ~ a4 * power 
+            
+            toxicity_teammate ~ b1 * obsessive + age + gender + education + income + hour + year + competitive
+            toxicity_teammate ~ b2 * harmonious
+            
+            # define the indirect effect
+            mul_har_tox := a3*b2
+            pow_har_tox := a4*b2
+            mul_obs_tox := a1*b1
+            pow_obs_tox := a2*b1
+            
+            # set the covariance
+            harmonious ~~ obsessive'
+
+my.fit2 <- sem(my.med2, data=df1, se="bootstrap", bootstrap=1000, missing = "ML")
+summary(my.fit2, standardized = TRUE, fit.measures = TRUE)
+parameterEstimates(my.fit2)
+
+```
+
+
+\newpage
+## Posthoc analysis
+
+
+```{r Hypothesis Testing Mediation SEM multigroup}
+# Set seed for replicability of results
+set.seed(10954)
+
+# Full model
+my.med0 <- '# direct effect
+            toxicity_teammate ~ c1 * mutual_dependence
+            toxicity_teammate ~ c2 * power
+            prosocial ~ c3 * mutual_dependence
+            prosocial ~ c4 * power
+            
+            # mediation
+            obsessive ~ a1 * mutual_dependence + age + gender + education + income + hour + year + competitive
+            obsessive ~ a2 * power 
+            harmonious ~ a3 * mutual_dependence + age + gender + education + income + hour + year + competitive
+            harmonious ~ a4 * power 
+            
+            toxicity_teammate ~ b1 * obsessive + age + gender + education + income + hour + year + competitive
+            toxicity_teammate ~ b2 * harmonious
+            prosocial ~ b3 * obsessive + age + gender + education + income + hour + year + competitive
+            prosocial ~ b4 * harmonious            
+            
+            # define the indirect effect
+            mul_har_pro := a3*b4
+            pow_har_pro := a4*b4
+            mul_obs_pro := a1*b3
+            pow_obs_pro := a2*b3
+            mul_har_tox := a3*b2
+            pow_har_tox := a4*b2
+            mul_obs_tox := a1*b1
+            pow_obs_tox := a2*b1
+            
+            # set the covariance
+            harmonious ~~ obsessive'
+
+my.fita <- sem(my.med0, data=df1, se="bootstrap", bootstrap=1000, missing = "ML", group = "genre")
+summary(my.fita, standardized = TRUE, fit.measures = TRUE)
+parameterEstimates(my.fita)
+```
+
+
+```{r Hypothesis Testing Mediation rowtotal}
+# Set seed for replicability of results
+set.seed(10563)
+
+# Full model
+my.med0 <- '# direct effect
+            toxicity_teammatetotal ~ c1 * mutual_dependence
+            toxicity_teammatetotal ~ c2 * power
+            prosocialtotal ~ c3 * mutual_dependence
+            prosocialtotal ~ c4 * power
+            
+            # mediation
+            obsessive ~ a1 * mutual_dependence + age + gender + education + income + hour + year + competitive
+            obsessive ~ a2 * power 
+            harmonious ~ a3 * mutual_dependence + age + gender + education + income + hour + year + competitive
+            harmonious ~ a4 * power 
+            
+            toxicity_teammatetotal ~ b1 * obsessive + age + gender + education + income + hour + year + competitive
+            toxicity_teammatetotal ~ b2 * harmonious
+            prosocialtotal ~ b3 * obsessive + age + gender + education + income + hour + year + competitive
+            prosocialtotal ~ b4 * harmonious            
+            
+            # define the indirect effect
+            mul_har_pro := a3*b4
+            pow_har_pro := a4*b4
+            mul_obs_pro := a1*b3
+            pow_obs_pro := a2*b3
+            mul_har_tox := a3*b2
+            pow_har_tox := a4*b2
+            mul_obs_tox := a1*b1
+            pow_obs_tox := a2*b1
+            
+            # set the covariance
+            harmonious ~~ obsessive'
+
+my.fitb <- sem(my.med0, data=df1, se="bootstrap", bootstrap=1000, missing = "ML")
+summary(my.fitb, standardized = TRUE, fit.measures = TRUE)
+parameterEstimates(my.fitb)
+```
+
